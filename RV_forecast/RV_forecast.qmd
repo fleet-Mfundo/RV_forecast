@@ -1,0 +1,737 @@
+---
+title: |
+  ![](logo.png){width=3.5in}
+
+
+  Forecasting Residual Values for Car Models
+author: "Mfundo Monchwe"
+date: "20 June 2025"
+website:
+  navbar: true
+  page-footer: "Copyright 2025, Mfundo Monchwe"
+  back-to-top-navigation: true
+  reader-mode: true
+  sidebar:
+    style: "docked"
+    search: true
+    contents:
+      - text: "Residual Values"
+        href: "Residual Values.qmd"
+format:
+  html:
+    embed-resources: true
+    theme: flatly
+---
+
+```{=html}
+<style type="text/css">
+  h1.title {
+    text-align: center;
+  }
+  h4.author {
+    text-align: center;
+    font-size: 1.5em;
+    font-weight: bold;
+  }
+  h4.date {
+    text-align: center;
+    font-size: 1.5em;
+    font-weight: bold;
+  }
+</style>
+```
+```{=html}
+<style type="text/css">
+.main-container {
+  max-width: 75% !important;
+  margin: auto;
+}
+</style>
+```
+::: callout-note
+## Introduction
+
+Residual value (RV%) refers to the estimated future value of a vehicle at the end of a lease or holding period, expressed as a percentage of its original price. This metric is critical for organizations like Avis that manage large vehicle fleets, as it directly influences:
+
+-   Fleet replacement and rotation strategies
+-   Lease pricing and depreciation modeling
+-   Profitability through resale planning
+
+By forecasting residual values accurately, Avis can make data-driven decisions that maximize return on investment and minimize total cost of ownership across its fleet.
+
+------------------------------------------------------------------------
+
+## Objectives
+
+-   To analyze historical residual values (RV%) from 2009 onward for various car models in the Avis fleet.
+-   To identify RV% trends and patterns by vehicle model and make.
+-   To develop forecasting models that estimate future residual values per vehicle model.
+-   To provide visual insights and recommendations that support strategic fleet management decisions.
+:::
+
+::: callout-caution
+### ✅ What You’ve Accomplished (Ready for Presentation)
+
+#### **1. Introduction & Context**
+
+-    Clear explanation of **residual value (RV%)** and its importance in **fleet management**.
+
+-   Relevance to Avis: helps guide leasing, resale, and rotation decisions.
+
+#### **2. Dataset Overview**
+
+-    Rich dataset covering **multiple car makes and models from 2009 onward**.
+
+-   Removed irrelevant columns, handled data limitations (e.g., year-only time resolution).
+
+#### **3. Exploratory Data Analysis (EDA)** 
+
+-   Analyzed RV% trends across **seven major makes** (AUDI, ISUZU, NISSAN, MERCEDES-BENZ, BMW, TOYOTA, VOLKSWAGEN).
+
+-    Identified and visualized **top 3 models per make** with line plots.
+
+-   Generated **descriptive statistics** (min, max, median, std, year span).
+
+-   Compared model behaviors and highlighted key depreciation patterns.
+
+#### **4. Strategic Insight**
+
+-    Added **make-level leaderboard**: TOYOTA and VOLKSWAGEN show strong retention; BMW and LAND ROVER are more volatile.
+
+-   Used these insights to justify which models to analyze deeper.
+
+#### **5. Forecasting** 
+
+-   Forecasted RV% for **7 selected models** using **linear regression**.
+
+-    Presented both:
+
+    -   **Tables** with predicted RV% for next 3 years
+
+    -   **Line charts** comparing historical vs. forecasted trends
+
+-    Provided **interpretation per model**, identifying which are:
+
+    -    High-retention (safe bets)
+
+    -    Stable commercial assets
+
+    -    Riskier or volatile choices
+:::
+
+```{r setuo, include=FALSE}
+knitr::opts_chunk$set( echo= FALSE,
+                       message = FALSE,
+                       comment =NA,
+                       include = TRUE
+  
+)
+
+```
+
+```{python}
+import pandas as pd
+
+data = pd.read_excel("RV_M_M_data.xlsx")
+data
+```
+
+::: callout-tip
+## ✅ Dataset Summary
+
+-   **Rows:** Each row is a snapshot of a specific **MAKE + MODEL** in a **specific Year**.
+
+-   Important columns
+
+    -   `MODEL`: Specific car model name.
+
+    <!-- -->
+
+    -   `Year`: Vehicle year (used as time index).
+
+    <!-- -->
+
+    -   `RV%`: Residual value percentage (target variable to forecast).
+
+    <!-- -->
+
+    -   `New` and `Trade`: Price-related columns (can help calculate/validate RV%)
+
+    -   `Age` appears constant across each Year batch, as expected (therefore exclude)
+:::
+
+```{python}
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+import numpy as np
+
+
+# Ensure Year is treated as an integer for sorting
+data['Year'] = data['Year'].astype(int)
+
+# Count of unique models and makes
+unique_models = data['MODEL'].nunique()
+unique_makes = data['MAKE'].nunique()
+
+# Group by Year to examine general RV% trend across all models
+avg_rv_by_year = data.groupby('Year')['RV%'].mean().reset_index()
+
+# Plot the average RV% over time
+plt.figure(figsize=(10, 6))
+sns.lineplot(data=avg_rv_by_year, x='Year', y='RV%')
+plt.title('Average Residual Value Percentage (RV%) Over Years')
+plt.ylabel('Average RV%')
+plt.xlabel('Year')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+
+```
+
+::: callout-note
+## Intepretation of the graph
+
+Here is the first exploratory visualization showing the **average residual value percentage (RV%) across all car models over time**. Key insights:
+
+-    **Downward trend**: As expected, average RV% declines over the years, which is typical as vehicles depreciate more rapidly in later model years.
+
+-    **Annual granularity** is sufficient for capturing long-term depreciation patterns, especially if our goal is to project future RV% at the model level.
+:::
+
+```{python}
+
+# Check how many years each model appears
+model_year_counts = data.groupby('MODEL')['Year'].nunique().reset_index(name='year_count')
+
+# Filter models with enough history (e.g., at least 5 years of data)
+long_running_models = model_year_counts[model_year_counts['year_count'] >= 5]['MODEL']
+
+# Pick a sample of 4 such models for visualization
+sample_models = long_running_models.sample(4, random_state=42).tolist()
+
+# Filter original dataframe for these models
+sample_df = data[data['MODEL'].isin(sample_models)]
+
+# Plot RV% trends for selected models
+plt.figure(figsize=(14, 8))
+sns.lineplot(data=sample_df, x='Year', y='RV%', hue='MODEL', marker='o')
+plt.title('Sample Model-wise Residual Value Trends')
+plt.ylabel('RV%')
+plt.xlabel('Year')
+plt.legend(title='Model', bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+
+```
+
+::: callout-note
+The plot above illustrates how residual value percentages have changed **over time for a few representative car models**. Key observations:
+
+-   Each **model follows its own depreciation curve**, with some declining sharply while others remain relatively stable.
+
+-   This validates the need to **forecast RV% at the individual model level** rather than applying a one-size-fits-all approach.
+:::
+
+```{python}
+# Filter dataset for selected well-known car makes
+selected_makes = ['AUDI', 'ISUZU', 'NISSAN', 'MERCEDES-BENZ']
+df_filtered = data[data['MAKE'].isin(selected_makes)]
+
+# Check how many unique models per selected make
+models_per_make = df_filtered.groupby('MAKE')['MODEL'].nunique().reset_index(name='unique_models')
+
+# Compute average RV% per year per make
+avg_rv_by_make_year = df_filtered.groupby(['MAKE', 'Year'])['RV%'].mean().reset_index()
+
+# Plot RV% trend per make over time
+plt.figure(figsize=(12, 8))
+sns.lineplot(data=avg_rv_by_make_year, x='Year', y='RV%', hue='MAKE', marker='o')
+plt.title('Average RV% Trend Over Time for Selected Makes')
+plt.ylabel('Average RV%')
+plt.xlabel('Year')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# Show number of models per selected make
+models_per_make
+
+```
+
+::: callout-tip
+## 🔍 Key Findings So Far:
+
+-   **Mercedes-Benz** has the most diverse portfolio in the dataset with **569 unique models**, followed by **Audi (320)**.
+
+-   The **average residual value (RV%) trends** show varying patterns:
+
+    -   **Audi and Mercedes-Benz** tend to retain higher RV% on average, but both show a steady decline over the years.
+
+    -   **Isuzu and Nissan** exhibit more fluctuation, possibly due to commercial vs. passenger model mixes.
+:::
+
+```{python}
+
+# Identify top 3 most frequently occurring models per selected make
+top_models_per_make = (
+    df_filtered.groupby(['MAKE', 'MODEL'])
+    .size()
+    .reset_index(name='count')
+    .sort_values(['MAKE', 'count'], ascending=[True, False])
+    .groupby('MAKE')
+    .head(3)
+)
+
+# Filter original dataset for only those top models
+top_models_df = df_filtered.merge(top_models_per_make[['MAKE', 'MODEL']], on=['MAKE', 'MODEL'])
+
+# Plot RV% trends for top models within each selected make
+g = sns.FacetGrid(top_models_df, col="MAKE", hue="MODEL", col_wrap=2, height=5, aspect=1.5, sharey=False)
+g.map(sns.lineplot, "Year", "RV%", marker="o")
+g.add_legend(title="Model")
+g.set_titles("{col_name}")
+g.set_axis_labels("Year", "RV%")
+plt.subplots_adjust(top=0.9)
+g.fig.suptitle("RV% Trends for Top 3 Models per Selected Make", fontsize=16)
+plt.show()
+
+```
+
+::: callout-note
+Here is a comprehensive visual breakdown of **residual value (RV%) trends** for the **top 4 most frequent models** within each of the following makes:
+
+-   AUDI
+
+-   ISUZU
+
+-   NISSAN
+
+-   MERCEDES-BENZ
+:::
+
+::: callout-tip
+## 🔍 Key Insights:
+
+-   **Distinct RV trajectories**: Each model has its own unique RV curve, highlighting the importance of model-specific forecasting.
+
+-   **MERCEDES-BENZ** models show relatively **higher retention** in earlier years, but most decline steadily after a few years.
+
+-   **UZU and NISSAN** models exhibit more erratic or sharper declines — possibly due to use in commercial fleets.
+
+-   **AUDI** models tend to depreciate more gradually, which might influence lease pricing and buy-back decisions.
+:::
+
+```{python}
+# Create summary statistics (min, max, median, std) of RV% for top models per make
+summary_stats = (
+    top_models_df
+    .groupby(['MAKE', 'MODEL'])
+    .agg(
+        min_rv=('RV%', 'min'),
+        max_rv=('RV%', 'max'),
+        median_rv=('RV%', 'median'),
+        std_rv=('RV%', 'std'),
+        count_years=('Year', 'nunique')
+    )
+    .reset_index()
+)
+
+summary_stats
+
+```
+
+::: callout-note
+Here is a detailed summary table for the **top 3 models per make** (AUDI, ISUZU, NISSAN, MERCEDES-BENZ), including:
+
+-   Minimum and maximum RV%
+
+-   **Median RV%** (helps identify typical resale strength)
+
+-   **Standard deviation of RV%** (volatility of residual value)
+
+-   **Number of years of data available** for each model
+:::
+
+::: callout-tip
+These metrics are valuable for assessing:
+
+-   **Depreciation stability**: Low standard deviation suggests a model retains value predictably
+
+-   **Resale reliability**: High median RV% implies good long-term return on vehicle investment.
+
+-   **Data sufficiency**: Models with \>5 years of data are good candidates for forecasting.
+:::
+
+```{python}
+# Generate a make-level leaderboard
+make_summary = (
+    data.groupby('MAKE')
+    .agg(
+        unique_models=('MODEL', 'nunique'),
+        year_span=('Year', 'nunique'),
+        median_rv=('RV%', 'median'),
+        std_rv=('RV%', 'std'),
+        count=('RV%', 'count')
+    )
+    .reset_index()
+    .sort_values(by='count', ascending=False)  # Sort by total records
+)
+
+# Display the top 20 makes with the richest data
+make_summary_top20 = make_summary.head(20)
+make_summary_top20
+
+```
+
+::: callout-note
+|     |                   |     |        |     |       |     |            |     |                                                                             |     |
+|-----|-------------------|-----|--------|-----|-------|-----|------------|-----|-----------------------------------------------------------------------------|-----|
+|     |                   |     |        |     |       |     |            |     |                                                                             |     |
+|     | MAKE              |     | Models |     | Years |     | Median RV% |     | Notes                                                                       |     |
+|     |                   |     |        |     |       |     |            |     |                                                                             |     |
+|     | **BMW**           |     | 1,074  |     | 9     |     | 0.49       |     | Largest model base — a must-add                                             |     |
+|     |                   |     |        |     |       |     |            |     |                                                                             |     |
+|     | **VOLKSWAGEN**    |     | 377    |     | 9     |     | 0.61       |     | Stable, high RV%                                                            |     |
+|     |                   |     |        |     |       |     |            |     |                                                                             |     |
+|     | **TOYOTA**        |     | 303    |     | 9     |     | **0.73**   |     | Highest RV% among top makes — ideal for highlighting strong value retention |     |
+|     |                   |     |        |     |       |     |            |     |                                                                             |     |
+|     | **LAND ROVER**    |     | 320    |     | 9     |     | 0.72       |     | High-end, high variance — good case study                                   |     |
+|     |                   |     |        |     |       |     |            |     |                                                                             |     |
+|     | **MERCEDES-BENZ** |     | 569    |     | 9     |     | 0.56       |     | Already included ✔                                                          |     |
+|     |                   |     |        |     |       |     |            |     |                                                                             |     |
+:::
+
+```{python}
+# Extend the selected makes to include BMW, TOYOTA, VOLKSWAGEN
+extended_makes = ['AUDI', 'ISUZU', 'NISSAN', 'MERCEDES-BENZ', 'BMW', 'TOYOTA', 'VOLKSWAGEN']
+df_ext = data[data['MAKE'].isin(extended_makes)]
+
+# Get top 3 models per extended make
+top_ext_models = (
+    df_ext.groupby(['MAKE', 'MODEL'])
+    .size()
+    .reset_index(name='count')
+    .sort_values(['MAKE', 'count'], ascending=[True, False])
+    .groupby('MAKE')
+    .head(3)
+)
+
+# Filter dataset for only these top models
+top_ext_models_df = df_ext.merge(top_ext_models[['MAKE', 'MODEL']], on=['MAKE', 'MODEL'])
+
+# Plot RV% trends for top 3 models of each extended make
+g = sns.FacetGrid(top_ext_models_df, col="MAKE", hue="MODEL", col_wrap=3, height=5, aspect=1.4, sharey=False)
+g.map(sns.lineplot, "Year", "RV%", marker="o")
+g.add_legend(title="Model")
+g.set_titles("{col_name}")
+g.set_axis_labels("Year", "RV%")
+plt.subplots_adjust(top=0.9)
+g.fig.suptitle("RV% Trends for Top 3 Models per Extended Make", fontsize=16)
+plt.show()
+
+```
+
+::: callout-tip
+## 🔍 Enhanced Observations:
+
+-   **TOYOTA and VOLKSWAGEN** models consistently hold their value well — ideal candidates for long-term leases.
+
+-   **BMW and LAND ROVER** (from earlier leaderboard) show **higher volatility**, highlighting luxury vehicle depreciation risks.
+:::
+
+```{python}
+# Select one representative model per make for forecasting (highest occurrence within each make)
+selected_models = (
+    top_ext_models
+    .sort_values(['MAKE', 'count'], ascending=[True, False])
+    .groupby('MAKE')
+    .head(1)[['MAKE', 'MODEL']]
+)
+
+# Prepare a dictionary to store data per model for forecasting
+model_forecast_data = {}
+
+# Extract time series data per selected model
+for _, row in selected_models.iterrows():
+    make = row['MAKE']
+    model = row['MODEL']
+    model_df = data[(data['MAKE'] == make) & (data['MODEL'] == model)]
+    
+    # Aggregate by year and sort
+    yearly_rv = model_df.groupby('Year')['RV%'].mean().reset_index()
+    model_forecast_data[f"{make} - {model}"] = yearly_rv
+
+# Display the selected models with RV% time series to the user
+model_forecast_data.keys()
+
+```
+
+```{python}
+from sklearn.linear_model import LinearRegression
+import numpy as np
+
+# Initialize dictionary to store forecast results
+forecast_results = {}
+
+# Apply linear regression model to each selected model's RV% over years
+for label, data in model_forecast_data.items():
+    # Prepare features and target
+    X = data['Year'].values.reshape(-1, 1)
+    y = data['RV%'].values
+    
+    # Fit linear regression model
+    model = LinearRegression()
+    model.fit(X, y)
+    
+    # Forecast next 3 years
+    future_years = np.array([X.max() + i for i in range(1, 4)]).reshape(-1, 1)
+    future_preds = model.predict(future_years)
+    
+    # Store results
+    forecast_df = pd.DataFrame({
+        'Year': future_years.flatten(),
+        'Predicted_RV%': future_preds
+    })
+    forecast_results[label] = forecast_df
+
+# Display one example forecast result to user (e.g., for AUDI)
+forecast_results['AUDI - A5 SPORTBACK 2.0 TDI STRONIC SPORT']
+
+```
+
+```{python}
+# Combine all forecast results into a single DataFrame for review
+all_forecasts = []
+
+for label, forecast_df in forecast_results.items():
+    make, model = label.split(" - ", 1)
+    forecast_df['MAKE'] = make
+    forecast_df['MODEL'] = model
+    all_forecasts.append(forecast_df)
+
+combined_forecast_df = pd.concat(all_forecasts, ignore_index=True)
+combined_forecast_df = combined_forecast_df[['MAKE', 'MODEL', 'Year', 'Predicted_RV%']]
+
+# Display the combined forecast table
+combined_forecast_df
+
+```
+
+::: callout-tip
+## ✅ Models Included:
+
+-   **AUDI** – A5 SPORTBACK
+
+-   **BMW** – S 1000 XR
+
+-   **ISUZU** – FXR 17-360
+
+-   **MERCEDES-BENZ** – E 200
+
+-   **NISSAN** – ALMERA 1.5 ACENTA
+
+-   **TOYOTA** – HILUX 2.0 VVTi
+
+-   **VOLKSWAGEN** – AMAROK 2.0 BiTDi
+:::
+
+```{python}
+# Plot forecast results for all models
+plt.figure(figsize=(16, 10))
+
+for label, historical_data in model_forecast_data.items():
+    forecast_df = forecast_results[label]
+    
+    # Historical
+    plt.plot(historical_data['Year'], historical_data['RV%'], label=f"{label} (Historical)", marker='o')
+    
+    # Forecast
+    plt.plot(forecast_df['Year'], forecast_df['Predicted_RV%'], label=f"{label} (Forecast)", linestyle='--', marker='x')
+
+plt.title("Forecasted vs Historical RV% for Selected Models")
+plt.xlabel("Year")
+plt.ylabel("RV%")
+plt.grid(True)
+plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+plt.tight_layout()
+plt.show()
+
+```
+
+::: callout-note
+## 📊 Interpretation of Forecast Results
+
+🚗 **AUDI – A5 SPORTBACK 2.0 TDI STRONIC SPORT**
+
+-   **Forecast:** RV% expected to **increase** over the next 3 years.
+
+-   **Insight:** This could indicate **improved resale perception** or **reduced depreciation** for newer model years — possibly due to market demand or luxury appeal.
+
+-   ⚠️ **Caution:** Verify if recent improvements in RV% are due to **market shifts or data sparsity**, as linear regression may overestimate future growth.
+
+🏍 **BMW – S 1000 XR**
+
+-   **Forecast:** A **steady upward trend**, with RV% approaching **0.84** by 2025.
+
+-   **Insight:** This high-performance bike may be benefiting from **sustained demand** in the second-hand market.
+
+-   ✅ **Recommendation:** Likely a **high-value retention asset** in the fleet; may justify longer leasing or resale holding period.
+
+🚚 **ISUZU – FXR 17-360 F/C C/C**
+
+-   **Forecast:** Mild **growth in RV%** expected.
+
+-   **Insight:** Suggests stable performance in resale value for commercial-use trucks.
+
+-   ✅ **Fleet Planning:** Could be a good long-term asset with **predictable value recovery**; less risky.
+
+🚘 **MERCEDES-BENZ – E 200**
+
+-   **Forecast:** RV% projected to **stabilize or gently increase**.
+
+-   **Insight:** Reflects this model’s **luxury reliability and brand strength**, sustaining good value post-use.
+
+-   ✅ **Strategic Decision:** A strong candidate for **executive fleet** with good lease-return economics.
+
+🚗 **NISSAN – ALMERA 1.5 ACENTA**
+
+-   **Forecast:** Slight **RV% rebound** in future years.
+
+-   **Insight:** A previously depreciating model showing signs of stabilization.
+
+-   ⚠️ **Consider:** Fleet managers should monitor **market shifts** or **new model releases** which may be improving outlook.
+
+🛻 **TOYOTA – HILUX 2.0 VVTi S P/U S/C**
+
+-   **Forecast:** **Consistently strong RV%** with mild increase.
+
+-   **Insight:** Hilux is known for durability — this forecast confirms its **robust residual performance**.
+
+-   ✅ **Fleet Guidance:** Excellent for long-term value, minimal depreciation risk.
+
+🚙 **VOLKSWAGEN – AMAROK 2.0 BiTDi HIGHLINE**
+
+-   **Forecast:** **Consistently strong RV%** with mild increase.
+
+-   **Insight:** Hilux is known for durability — this forecast confirms its **robust residual performance**.
+
+-   ✅ **Fleet Guidance:** Excellent for long-term value, minimal depreciation risk.
+:::
+
+::: callout-important
+## 🧠 Executive Summary
+
+-   **TOYOTA and VOLKSWAGEN** show the **highest retained value**, ideal for core fleet use.
+
+-   **BMW and MERCEDES-BENZ** show strong **luxury retention**, great for premium leasing.
+
+-   **ISUZU** offers **commercial value stability**.
+
+-   **NISSAN and AUDI** require closer monitoring due to **unusual RV movements**.
+:::
+
+::: callout-note
+## 📌 Executive Summary
+
+-   This analysis investigates historical and forecasted residual values (RV%) across 7 key automotive brands in the Avis fleet: **AUDI, ISUZU, NISSAN, MERCEDES-BENZ, BMW, TOYOTA, and VOLKSWAGEN**.
+-   Exploratory analysis reveals substantial variation in residual value trends across makes and models, with **TOYOTA and VOLKSWAGEN** exhibiting the strongest value retention.
+-   Using historical data from 2009 to 2020, we fitted linear regression models to forecast future RV% values for representative models per brand.
+-   Forecasts suggest a continued strong performance by **TOYOTA Hilux** and **VW Amarok**, while luxury models (e.g., **BMW S 1000 XR**, **Mercedes E 200**) maintain high but more volatile RV%.
+-   These insights support more strategic planning of fleet retention, resale timing, and purchase decisions.
+:::
+
+::: callout-tip
+## 📌 Recommendations
+
+-   **Prioritize high-retention models** such as TOYOTA Hilux and VW Amarok for long-term use in the fleet due to their predictable and high resale values.
+-   **Consider luxury models** like BMW and Mercedes-Benz for premium client use, while maintaining close monitoring of their value volatility.
+-   **Monitor models with inconsistent trends** (e.g., NISSAN Almera, AUDI A5) for potential replacement or shorter lease cycles to minimize financial risk.
+-   Use this RV% analysis to guide **fleet rotation schedules, pricing strategies, and procurement** planning at Avis.
+-   
+:::
+
+```{python}
+# Filter only necessary columns and drop rows with missing RV% or Year
+df_clean = data[['MAKE', 'MODEL', 'Year', 'RV%']].dropna()
+
+# Only keep models with at least 4 years of data to allow meaningful forecasting
+model_year_counts = df_clean.groupby('MODEL')['Year'].nunique()
+eligible_models = model_year_counts[model_year_counts >= 4].index
+df_eligible = df_clean[df_clean['MODEL'].isin(eligible_models)]
+
+# Prepare list to collect forecasts
+full_forecast_list = []
+
+# Forecast per MODEL
+for model, group in df_eligible.groupby('MODEL'):
+    group_sorted = group.groupby('Year')['RV%'].mean().reset_index()
+    X = group_sorted['Year'].values.reshape(-1, 1)
+    y = group_sorted['RV%'].values
+    
+    # Fit linear regression model
+    model_lr = LinearRegression()
+    model_lr.fit(X, y)
+    
+    # Forecast next 3 years beyond latest year
+    future_years = np.arange(X.max() + 1, X.max() + 4).reshape(-1, 1)
+    future_preds = model_lr.predict(future_years)
+    
+    # Append forecast results with MAKE and MODEL
+    make_name = group['MAKE'].iloc[0]
+    for year, pred in zip(future_years.flatten(), future_preds):
+        full_forecast_list.append({
+            'MAKE': make_name,
+            'MODEL': model,
+            'Year': int(year),
+            'Predicted_RV%': float(pred)
+        })
+
+# Create DataFrame
+full_forecast_df = pd.DataFrame(full_forecast_list)
+
+# Save to CSV
+output_path = "full_model_forecasts.csv"
+full_forecast_df.to_csv(output_path, index=False)
+
+output_path
+
+```
+
+```{python}
+
+# Select a random sample of 6 models for visualization
+sample_models = full_forecast_df['MODEL'].drop_duplicates().sample(6, random_state=42).tolist()
+
+# Prepare data for historical + forecasted RV% for these models
+charts_data = []
+
+for model in sample_models:
+    historical = df_eligible[df_eligible['MODEL'] == model].groupby('Year')['RV%'].mean().reset_index()
+    historical['Source'] = 'Historical'
+    
+    forecast = full_forecast_df[full_forecast_df['MODEL'] == model][['Year', 'Predicted_RV%']].rename(columns={'Predicted_RV%': 'RV%'})
+    forecast['Source'] = 'Forecast'
+    
+    combined = pd.concat([historical, forecast], ignore_index=True)
+    combined['MODEL'] = model
+    charts_data.append(combined)
+
+# Combine all for plotting
+plot_df = pd.concat(charts_data, ignore_index=True)
+
+# Plot
+g = sns.FacetGrid(plot_df, col="MODEL", hue="Source", col_wrap=3, height=4.5, aspect=1.5, sharey=False)
+g.map(sns.lineplot, "Year", "RV%", marker="o")
+g.add_legend(title="Data Source")
+g.set_titles("{col_name}")
+g.set_axis_labels("Year", "RV%")
+plt.subplots_adjust(top=0.9)
+g.fig.suptitle("Sample of Forecasted vs Historical RV% by Model", fontsize=16)
+plt.show()
+
+```
